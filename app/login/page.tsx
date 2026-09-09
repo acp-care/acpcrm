@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { createClient } from '../../lib/supabase/client'
 
 export default function LoginPage() {
@@ -10,17 +10,44 @@ export default function LoginPage() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get('error')
+    if (error) setMessage(error.replaceAll('_', ' '))
+  }, [])
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setBusy(true)
     setMessage('')
+
     const supabase = createClient()
+    const origin = window.location.origin
     const result = mode === 'login'
       ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password })
+      : await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${origin}/auth/callback`,
+          },
+        })
+
     setBusy(false)
-    if (result.error) return setMessage(result.error.message)
-    if (mode === 'signup') return setMessage('Account created. Check your email if confirmation is enabled, then sign in.')
+
+    if (result.error) {
+      setMessage(result.error.message)
+      return
+    }
+
+    if (mode === 'signup') {
+      if (result.data.session) {
+        window.location.href = '/'
+        return
+      }
+      setMessage('Account created. Check your email and click the confirmation link to finish setting up your CRM.')
+      return
+    }
+
     window.location.href = '/'
   }
 
@@ -33,7 +60,7 @@ export default function LoginPage() {
       {message && <div className="notice">{message}</div>}
       <button className="btn full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
     </form>
-    <button className="link-button" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+    <button className="link-button" onClick={() => { setMessage(''); setMode(mode === 'login' ? 'signup' : 'login') }}>
       {mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
     </button>
   </section></main>
