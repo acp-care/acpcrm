@@ -1,0 +1,28 @@
+import { NextResponse } from 'next/server'
+import { createClient } from '../../../lib/supabase/server'
+
+const standard = [
+  ['first_name','First name','text'],['last_name','Last name','text'],['email','Email','email'],['phone','Phone','phone'],['date_of_birth','Date of birth','date'],['external_ref','External reference','text'],['status','Status','text']
+]
+
+async function context() {
+  const supabase = await createClient(); const { data:{user} } = await supabase.auth.getUser(); if(!user) return {supabase,user:null,org:null}
+  const {data:member}=await supabase.from('organization_members').select('organization_id,role').eq('user_id',user.id).limit(1).maybeSingle(); if(!member) return {supabase,user,org:null}
+  return {supabase,user,org:{id:member.organization_id,role:member.role}}
+}
+export async function GET(){
+  const {supabase,user,org}=await context(); if(!user)return NextResponse.json({error:'Unauthorised'},{status:401}); if(!org)return NextResponse.json({error:'Organisation not found'},{status:403})
+  const {data:forms}=await supabase.from('forms').select('id,name').eq('organization_id',org.id).order('name')
+  const {data:fields}=await supabase.from('customer_field_definitions').select('id,key,label,field_type').eq('organization_id',org.id).eq('is_active',true).order('label')
+  const existing=fields||[]
+  if(existing.length===0){await supabase.from('customer_field_definitions').insert(standard.map(([key,label,field_type])=>({organization_id:org.id,key,label,field_type}))); const refreshed=await supabase.from('customer_field_definitions').select('id,key,label,field_type').eq('organization_id',org.id).eq('is_active',true).order('label'); return NextResponse.json({forms:forms||[],fields:refreshed.data||[],mappings:[]})}
+  const {data:mappings}=await supabase.from('field_mappings').select('id,form_id,form_field_key,target_type,target_key,transform,enabled').eq('organization_id',org.id).order('created_at')
+  return NextResponse.json({forms:forms||[],fields:existing,mappings:mappings||[]})
+}
+export async function POST(request:Request){
+  const {supabase,user,org}=await context(); if(!user||!org)return NextResponse.json({error:'Unauthorised'},{status:401}); const body=await request.json();
+  const payload={organization_id:org.id,form_id:body.form_id,form_field_key:String(body.form_field_key||''),target_type:'customer',target_key:String(body.target_key||''),transform:body.transform||null,enabled:body.enabled!==false};
+  if(!payload.form_id||!payload.form_field_key||!payload.target_key)return NextResponse.json({error:'Form, source field and target field are required'},{status:422})
+  const {data,error}=await supabase.from('field_mappings').upsert(payload,{onConflict:'form_id,form_field_key,target_key'}).select().single(); if(error)return NextResponse.json({error:error.message},{status:400}); return NextResponse.json({mapping:data})
+}
+export async function DELETE(request:Request){const {supabase,user,org}=await context();if(!user||!org)return NextResponse.json({error:'Unauthorised'},{status:401});const id=new URL(request.url).searchParams.get('id');if(!id)return NextResponse.json({error:'Mapping id required'},{status:422});const {error}=await supabase.from('field_mappings').delete().eq('id',id).eq('organization_id',org.id);if(error)return NextResponse.json({error:error.message},{status:400});return NextResponse.json({ok:true})}
