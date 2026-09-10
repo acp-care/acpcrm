@@ -17,38 +17,44 @@ export default function LoginPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (busy) return
+
     setBusy(true)
     setMessage('')
 
-    const supabase = createClient()
-    const origin = window.location.origin
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${origin}/auth/callback`,
-          },
-        })
+    try {
+      const supabase = createClient()
+      const origin = window.location.origin
+      const result = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${origin}/auth/callback`,
+            },
+          })
 
-    setBusy(false)
-
-    if (result.error) {
-      setMessage(result.error.message)
-      return
-    }
-
-    if (mode === 'signup') {
-      if (result.data.session) {
-        window.location.href = '/'
+      if (result.error) {
+        setMessage(result.error.message)
         return
       }
-      setMessage('Account created. Check your email and click the confirmation link to finish setting up your CRM.')
-      return
-    }
 
-    window.location.href = '/'
+      if (mode === 'signup') {
+        if (result.data.session) {
+          window.location.href = '/'
+          return
+        }
+        setMessage('Account created. Check your email and click the confirmation link to finish setting up your CRM.')
+        return
+      }
+
+      window.location.href = '/'
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to connect to the authentication service.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return <main className="auth-shell"><section className="auth-card">
